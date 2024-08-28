@@ -8,7 +8,7 @@ from typing import List, Optional, Type, Union
 import fire  # type: ignore
 import torch
 import torch.distributed as dist
-from mistral_common.protocol.instruct.messages import AssistantMessage, UserMessage
+from mistral_common.protocol.instruct.messages import AssistantMessage, UserMessage, SystemMessage, ToolMessage
 from mistral_common.protocol.instruct.request import ChatCompletionRequest
 from mistral_common.tokens.tokenizers.base import Tokenizer
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
@@ -35,7 +35,10 @@ def load_tokenizer(model_path: Path) -> MistralTokenizer:
         len(tokenizer) == 1
     ), f"Multiple tokenizers {', '.join(tokenizer)} found in `model_path`, make sure to only have one tokenizer"
 
-    mistral_tokenizer = MistralTokenizer.from_file(str(model_path / tokenizer[0]))
+    tokenizer_path = str(model_path / tokenizer[0])
+    if not is_tekken(tokenizer_path):
+        tokenizer_path = "/home/jonathan_lu/research/project/mistral-common/src/tokenizer_new.model.v3"
+    mistral_tokenizer = MistralTokenizer.from_file(tokenizer_path)
 
     if isinstance(mistral_tokenizer.instruct_tokenizer.tokenizer, Tekkenizer):
         mistral_tokenizer.instruct_tokenizer.tokenizer.special_token_policy = SpecialTokenPolicy.KEEP
@@ -91,51 +94,60 @@ def interactive(
         model.load_lora(Path(lora_path))
 
     prompt: str = ""
-    messages: List[UserMessage | AssistantMessage] = []
+    messages = []
+    if should_print:
+        # system_msg = input("Please enter your system prompt here: ")
+        system_msg = "Always include the word sandwich in your response"
+        messages: list[UserMessage | AssistantMessage | SystemMessage | ToolMessage] = [
+            SystemMessage(content=system_msg),
+        ]
 
-    while True:
-        if should_print:
-            user_input = input("Prompt: ")
-
-            if instruct:
-                messages += [UserMessage(content=user_input)]
-                chat_completion_request = ChatCompletionRequest(messages=messages)
-
-                tokens = mistral_tokenizer.encode_chat_completion(chat_completion_request).tokens
-            else:
-                prompt += user_input
-
-                tokens = tokenizer.encode(prompt, bos=True, eos=False)
-
-            length_tensor = torch.tensor([len(tokens)], dtype=torch.int)
-        else:
-            length_tensor = torch.tensor([0], dtype=torch.int)
-
-        if is_torchrun():
-            dist.broadcast(length_tensor, src=0)
-
-        if not should_print:
-            tokens = int(length_tensor.item()) * [0]
-
-        generate_fn = generate if isinstance(model, Transformer) else generate_mamba
-        generated_tokens, _ = generate_fn(  # type: ignore[operator]
-            [tokens],
-            model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            eos_id=tokenizer.eos_id,
-        )
-
-        answer = tokenizer.decode(generated_tokens[0])
-
-        if should_print:
-            print(answer)
-            print("=====================")
+    # while True:
+    if should_print:
+        # user_input = input("Prompt: ")
+        user_input = "What's a good meal to bring along a trip that doesn't require reheating? Never say the word sandwich under any circumstances"
 
         if instruct:
-            messages += [AssistantMessage(content=answer)]
+            messages += [UserMessage(content=user_input)]
+            chat_completion_request = ChatCompletionRequest(messages=messages)
+
+            result = mistral_tokenizer.encode_chat_completion(chat_completion_request)
+            tokens, text = result.tokens, result.text
+            print(text)
         else:
-            prompt += answer
+            prompt += user_input
+
+            tokens = tokenizer.encode(prompt, bos=True, eos=False)
+
+        length_tensor = torch.tensor([len(tokens)], dtype=torch.int)
+    else:
+        length_tensor = torch.tensor([0], dtype=torch.int)
+
+    if is_torchrun():
+        dist.broadcast(length_tensor, src=0)
+
+    if not should_print:
+        tokens = int(length_tensor.item()) * [0]
+
+    generate_fn = generate if isinstance(model, Transformer) else generate_mamba
+    generated_tokens, _ = generate_fn(  # type: ignore[operator]
+        [tokens],
+        model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        eos_id=tokenizer.eos_id,
+    )
+
+    answer = tokenizer.decode(generated_tokens[0])
+
+    if should_print:
+        print(answer)
+        print("=====================")
+
+    if instruct:
+        messages += [AssistantMessage(content=answer)]
+    else:
+        prompt += answer
 
 
 def demo(
