@@ -111,9 +111,10 @@ class LoRALoaderMixin:
         assert all("lora" in key for key in lora_state_dict.keys())
 
         # move tensors to device
-        lora_state_dict = {k: v.to(self.device) for k, v in lora_state_dict.items()}  # type: ignore[attr-defined]
+        # lora_state_dict = {k: v.to(self.device) for k, v in lora_state_dict.items()}  # type: ignore[attr-defined]
 
         state_dict = self.state_dict()  # type: ignore[attr-defined]
+        state_dict = {k: v.cpu() for k, v in state_dict.items()}
 
         if self.args.lora is None:  # type: ignore[attr-defined]
             logging.info("Loading and merging LoRA weights...")
@@ -131,7 +132,7 @@ class LoRALoaderMixin:
                         )
                     elif (name + ".lora_B.weight") in lora_state_dict:
                         weight = (
-                            module.weight
+                            module.weight.cpu()
                             + (lora_state_dict[name + ".lora_B.weight"] @ lora_state_dict[name + ".lora_A.weight"])
                             * scaling
                         )

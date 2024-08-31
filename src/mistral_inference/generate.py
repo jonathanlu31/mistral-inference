@@ -90,16 +90,26 @@ def generate(
             # Pass > 1
             last_token_logits = torch.log_softmax(last_token_prelogits, dim=-1)
             for i_seq in range(B):
-                logprobs[i_seq].append(last_token_logits[i_seq, prompt_chunks[i_seq][0]].item())
+                logprobs[i_seq].append(
+                    last_token_logits[i_seq, prompt_chunks[i_seq][0]].item()
+                )
 
         offset = 0
         for i_seq, sequence in enumerate(prompt_chunks):
-            logprobs[i_seq].extend([logits[offset + i, sequence[i + 1]].item() for i in range(len(sequence) - 1)])
+            logprobs[i_seq].extend(
+                [
+                    logits[offset + i, sequence[i + 1]].item()
+                    for i in range(len(sequence) - 1)
+                ]
+            )
             offset += len(sequence)
 
         last_token_prelogits = prelogits.index_select(
             0,
-            torch.tensor([len(p) for p in prompt_chunks], device=prelogits.device).cumsum(dim=0) - 1,
+            torch.tensor(
+                [len(p) for p in prompt_chunks], device=prelogits.device
+            ).cumsum(dim=0)
+            - 1,
         )
         assert last_token_prelogits.shape == (B, V)
 
@@ -128,6 +138,14 @@ def generate(
     generated_tokens: List[List[int]]
     if generated_tensors:
         generated_tokens = torch.cat(generated_tensors, 1).tolist()
+        generated_tokens = [
+            (
+                token_list[: token_list.index(eos_id) + 1]
+                if eos_id in token_list
+                else token_list
+            )
+            for token_list in generated_tokens
+        ]
     else:
         generated_tokens = []
 
